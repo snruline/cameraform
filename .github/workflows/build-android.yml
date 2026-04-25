@@ -22,6 +22,9 @@ jobs:
     name: Build APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Opt-in Node 24 ตั้งแต่ตอนนี้ (silence Node 20 deprecation warning)
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
     steps:
       # ───────────────────────────────────────────────────────
@@ -57,10 +60,13 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: |
-            platforms;android-34
-            build-tools;34.0.0
-            ndk;26.1.10909125
+          packages: 'platforms;android-34 build-tools;34.0.0 ndk;26.1.10909125'
+          accept-android-sdk-licenses: true
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platforms;android-34"
+          sdkmanager "build-tools;34.0.0"
+          sdkmanager "ndk;26.1.10909125"
 
       # ───────────────────────────────────────────────────────
       # 5. Cache Gradle (ครั้งหลัง build เร็วขึ้น 5-10x)
