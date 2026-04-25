@@ -1,0 +1,146 @@
+name: Build Android APK
+
+# Trigger เมื่อ:
+#   - Push เข้า branch main หรือ master
+#   - กด "Run workflow" จากหน้า GitHub Actions (workflow_dispatch)
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ───────────────────────────────────────────────────────
+      # 1. Checkout
+      # ───────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ───────────────────────────────────────────────────────
+      # 2. Setup Node.js 18 + cache npm
+      # ───────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci --no-audit --no-fund
+
+      # ───────────────────────────────────────────────────────
+      # 3. Setup Java 17 (RN 0.75 requires)
+      # ───────────────────────────────────────────────────────
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # ───────────────────────────────────────────────────────
+      # 4. Setup Android SDK + accept licenses
+      # ───────────────────────────────────────────────────────
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platforms;android-34
+            build-tools;34.0.0
+            ndk;26.1.10909125
+
+      # ───────────────────────────────────────────────────────
+      # 5. Cache Gradle (ครั้งหลัง build เร็วขึ้น 5-10x)
+      # ───────────────────────────────────────────────────────
+      - name: Cache Gradle wrapper + dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # ───────────────────────────────────────────────────────
+      # 6. Make gradlew executable (Linux runner)
+      # ───────────────────────────────────────────────────────
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+
+      # ───────────────────────────────────────────────────────
+      # 7. Build APK (release หรือ debug ตาม input)
+      # ───────────────────────────────────────────────────────
+      - name: Build Release APK
+        if: ${{ github.event.inputs.build_type != 'debug' }}
+        working-directory: android
+        run: |
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Build Debug APK
+        if: ${{ github.event.inputs.build_type == 'debug' }}
+        working-directory: android
+        run: |
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      # ───────────────────────────────────────────────────────
+      # 8. List + size APK files (ดูใน build log ได้)
+      # ───────────────────────────────────────────────────────
+      - name: List APK files + sizes
+        run: |
+          echo "=== Generated APK files ==="
+          find android/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
+
+      # ───────────────────────────────────────────────────────
+      # 9. Upload APKs as artifacts (เก็บไว้ download ได้ 90 วัน)
+      # ───────────────────────────────────────────────────────
+      - name: Upload Release APKs
+        if: ${{ github.event.inputs.build_type != 'debug' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cameraform-release-apks
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload Debug APK
+        if: ${{ github.event.inputs.build_type == 'debug' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cameraform-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      # ───────────────────────────────────────────────────────
+      # 10. Summary บนหน้า workflow run
+      # ───────────────────────────────────────────────────────
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -d "android/app/build/outputs/apk" ]; then
+            echo "### APKs generated:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            find android/app/build/outputs/apk -name "*.apk" -exec ls -lh {} \; | awk '{print $9, "(" $5 ")"}' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📦 Download APKs from the **Artifacts** section above ⬆️" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ No APK output folder found." >> $GITHUB_STEP_SUMMARY
+          fi
