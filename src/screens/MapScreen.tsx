@@ -295,6 +295,12 @@ export const MapScreen: React.FC = () => {
     try {
       const results = await DocumentPicker.pick({
         type: [DocumentPicker.types.images],
+        // mode: 'open' = ACTION_OPEN_DOCUMENT (Storage Access Framework)
+        // ⚠️ สำคัญที่สุด: ถ้าไม่ระบุจะ default เป็น 'import' ซึ่งบน Android 13+
+        //    จะใช้ system Photo Picker ที่ strip EXIF GPS อัตโนมัติเพื่อ privacy
+        //    → ภาพ upload มาจะไม่มีพิกัด แม้ต้นฉบับจะมี
+        // ใช้ 'open' ทำให้ผู้ใช้เลือกผ่าน file browser ที่ preserve EXIF
+        mode: 'open',
         // copyTo: เก็บไฟล์ลง documentDirectory เพื่อให้ยังเปิดได้หลังรีสตาร์ท
         // แม้ต้นฉบับ (camera roll / content URI) จะหายไป
         copyTo: 'documentDirectory',
@@ -303,25 +309,44 @@ export const MapScreen: React.FC = () => {
       let ok = 0;
       let skipped = 0;
       const skippedNames: string[] = [];
+
+      // Helper: ทำ path สะอาด สำหรับ RNFS (ตัด file:// prefix ถ้ามี)
+      const toReadablePath = (u: string): string =>
+        u.startsWith('file://') ? u.replace('file://', '') : u;
+
       for (const r of results) {
-        const uri: string | null =
-          ((r as any).fileCopyUri as string | null) ?? r.uri;
-        if (!uri) {
+        const copiedUri: string | null = (r as any).fileCopyUri ?? null;
+        const originalUri: string | null = r.uri ?? null;
+        const persistentUri = copiedUri ?? originalUri;
+        if (!persistentUri) {
           skipped++;
           continue;
         }
-        const path = uri.startsWith('file://')
-          ? uri.replace('file://', '')
-          : uri;
-        const gps = await readExifGps(path);
+
+        // อ่าน EXIF GPS — ลองหลายแหล่งเพราะบาง Android picker copy ไฟล์
+        // แล้ว re-encode JPEG ทำให้ EXIF GPS หายไป
+        // 1) ลอง originalUri ก่อน — content:// หรือ file:// ของไฟล์ต้นฉบับ
+        //    (RNFS readFile รองรับ content:// บน Android API 21+)
+        // 2) ถ้าไม่ได้ค่อย fall back ไป copiedUri
+        let gps = null;
+        if (originalUri) {
+          gps = await readExifGps(toReadablePath(originalUri));
+        }
+        if (!gps && copiedUri && copiedUri !== originalUri) {
+          gps = await readExifGps(toReadablePath(copiedUri));
+        }
+
         if (!gps) {
           skipped++;
           if (r.name) skippedNames.push(r.name);
           continue;
         }
+
         await addUploadedPhoto({
           id: generateId(),
-          filePath: uri.startsWith('file://') ? uri : 'file://' + uri,
+          filePath: persistentUri.startsWith('file://')
+            ? persistentUri
+            : 'file://' + persistentUri,
           latitude: gps.latitude,
           longitude: gps.longitude,
           capturedAt: gps.capturedAt,
@@ -334,7 +359,11 @@ export const MapScreen: React.FC = () => {
       if (ok === 0 && skipped > 0) {
         Alert.alert(
           'No GPS found',
-          'None of the selected images have GPS coordinates in EXIF. Only photos taken with location services on can be pinned.',
+          'None of the selected images have GPS coordinates.\n\n' +
+            'Tips:\n' +
+            '• Make sure the photo was taken with Location turned ON in Camera settings\n' +
+            '• Avoid sending photos via LINE / WhatsApp / Messenger — they strip GPS\n' +
+            '• Avoid photos saved from messaging or downloaded from the web',
         );
       } else if (skipped > 0) {
         Alert.alert(
