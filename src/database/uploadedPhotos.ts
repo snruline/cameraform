@@ -86,3 +86,13 @@ export async function deleteUploadedPhoto(id: string): Promise<void> {
   const db = getDb();
   await db.executeAsync('DELETE FROM UploadedPhotos WHERE id = ?', [id]);
 }
+
+/**
+ * ลบรูปอัพโหลดทั้งหมด — ใช้กับปุ่ม "Clear all" ในหน้า Map
+ * (ไม่แตะไฟล์ใน documentDirectory จริง — แค่ลบ row ใน DB)
+ */
+export async function clearAllUploadedPhotos(): Promise<number> {
+  const db = getDb();
+  const res = await db.executeAsync('DELETE FROM UploadedPhotos');
+  return res.rowsAffected ?? 0;
+}

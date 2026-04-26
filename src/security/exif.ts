@@ -177,12 +177,27 @@ export async function readExifGps(
   const latRef = gps[piexif.GPSIFD.GPSLatitudeRef];
   const lngArr = gps[piexif.GPSIFD.GPSLongitude];
   const lngRef = gps[piexif.GPSIFD.GPSLongitudeRef];
-  if (!latArr || !lngArr) return null;
+
+  // ตรวจ DMS array แบบเข้มงวด — ไม่รับ empty array `[]` (truthy ใน JS) หรือ
+  // array ที่ไม่ครบ 3 elements (D, M, S)
+  // ที่เพิ่มจากเดิม: เดิมใช้ if (!latArr || !lngArr) ซึ่ง [] ผ่าน → dmsToDeg
+  // คืน 0 → ทุกภาพได้พิกัด 0,0
+  if (!Array.isArray(latArr) || latArr.length !== 3) return null;
+  if (!Array.isArray(lngArr) || lngArr.length !== 3) return null;
+
   let latitude = dmsToDeg(latArr);
   let longitude = dmsToDeg(lngArr);
   if (latRef === 'S') latitude = -latitude;
   if (lngRef === 'W') longitude = -longitude;
   if (!isFinite(latitude) || !isFinite(longitude)) return null;
+
+  // Reject "Null Island" (0,0) — ตำแหน่งกลางมหาสมุทรแอตแลนติกแถบเส้นศูนย์สูตร
+  // ที่ EXIF บางรูปเก็บไว้ตอนไม่มี GPS จริง (เช่น รูปจากโปรแกรมตัดต่อ)
+  // ถ้าเป็น 0,0 จริง ๆ คงน้อยมาก ใส่ tolerance 0.0001° (~10 m) ปลอดภัย
+  if (Math.abs(latitude) < 0.0001 && Math.abs(longitude) < 0.0001) return null;
+
+  // Reject ค่าที่นอก range — ป้องกัน garbage data
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
 
   // DateTimeOriginal: "YYYY:MM:DD HH:MM:SS" — แปลงเป็น ISO แบบประมาณ
   // (ไม่มี timezone ใน EXIF — treat as local)

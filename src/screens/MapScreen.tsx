@@ -22,6 +22,7 @@ import {
   listUploadedPhotos,
   addUploadedPhoto,
   deleteUploadedPhoto,
+  clearAllUploadedPhotos,
 } from '../database/uploadedPhotos';
 import {readExifGps} from '../security/exif';
 import {generateId} from '../utils/id';
@@ -373,6 +374,45 @@ export const MapScreen: React.FC = () => {
     );
   };
 
+  /** ลบทีละรายการจาก list — รับแค่ id (ไม่ต้องโหลด full row) */
+  const removeUploadedById = (id: string) => {
+    Alert.alert('Remove pin?', 'Remove this uploaded image from the map?', [
+      {text: 'Cancel', style: 'cancel'},
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteUploadedPhoto(id);
+          if (selected?.kind === 'uploaded' && selected.id === id) {
+            setSelected(null);
+          }
+          await loadUploaded();
+        },
+      },
+    ]);
+  };
+
+  /** ลบทั้งหมด — ใช้กับ "Clear all" ใน list header */
+  const clearAllUploaded = () => {
+    if (uploadedPhotos.length === 0) return;
+    Alert.alert(
+      'Clear all uploaded?',
+      `Remove all ${uploadedPhotos.length} uploaded image pins from the map? Original files on your device won't be deleted.`,
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Clear all',
+          style: 'destructive',
+          onPress: async () => {
+            await clearAllUploadedPhotos();
+            if (selected?.kind === 'uploaded') setSelected(null);
+            await loadUploaded();
+          },
+        },
+      ],
+    );
+  };
+
   // -----------------------------------------------------------------
   // derived UI state
   // -----------------------------------------------------------------
@@ -505,47 +545,68 @@ export const MapScreen: React.FC = () => {
               {tab === 'upload' ? 'Uploaded' : 'Gallery'}
               <Text style={styles.listCount}>  {currentCount}</Text>
             </Text>
-            <TouchableOpacity onPress={() => setListOpen(false)} hitSlop={12}>
-              <Text style={styles.listClose}>Close</Text>
-            </TouchableOpacity>
+            <View style={styles.listHeaderActions}>
+              {/* "Clear all" — เฉพาะ tab Upload Images และเมื่อมีรายการ */}
+              {tab === 'upload' && uploadedPhotos.length > 0 && (
+                <TouchableOpacity
+                  onPress={clearAllUploaded}
+                  hitSlop={8}
+                  style={styles.listHeaderClearBtn}>
+                  <Text style={styles.listHeaderClearText}>Clear all</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={() => setListOpen(false)} hitSlop={12}>
+                <Text style={styles.listClose}>Close</Text>
+              </TouchableOpacity>
+            </View>
           </View>
           <FlatList
             data={currentList}
             keyExtractor={item => `${item.kind}:${item.id}`}
             renderItem={({item}) => (
-              <TouchableOpacity
-                style={styles.listItem}
-                onPress={() => {
-                  setSelected({kind: item.kind, id: item.id});
-                  setListOpen(false);
-                  // หาพิกัดเพื่อ center map ไปยัง pin นี้
-                  const m = markers.find(
-                    mk => mk.id === `${item.kind}:${item.id}`,
-                  );
-                  if (m && mapReady) {
-                    inject(
-                      `window.CF.setCenter(${m.lat}, ${m.lng}, 16)`,
+              <View style={styles.listItem}>
+                <TouchableOpacity
+                  style={styles.listItemMain}
+                  onPress={() => {
+                    setSelected({kind: item.kind, id: item.id});
+                    setListOpen(false);
+                    // หาพิกัดเพื่อ center map ไปยัง pin นี้
+                    const m = markers.find(
+                      mk => mk.id === `${item.kind}:${item.id}`,
                     );
-                  }
-                }}>
-                {item.filePath && (
-                  <Image
-                    source={{uri: item.filePath}}
-                    style={styles.listThumb}
-                  />
-                )}
-                <View style={{flex: 1}}>
-                  <Text style={styles.listItemTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  {!!item.subtitle && (
-                    <Text style={styles.listItemSub} numberOfLines={2}>
-                      {item.subtitle}
-                    </Text>
+                    if (m && mapReady) {
+                      inject(`window.CF.setCenter(${m.lat}, ${m.lng}, 16)`);
+                    }
+                  }}>
+                  {item.filePath && (
+                    <Image
+                      source={{uri: item.filePath}}
+                      style={styles.listThumb}
+                    />
                   )}
-                  <Text style={styles.listItemMeta}>{item.meta}</Text>
-                </View>
-              </TouchableOpacity>
+                  <View style={{flex: 1}}>
+                    <Text style={styles.listItemTitle} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                    {!!item.subtitle && (
+                      <Text style={styles.listItemSub} numberOfLines={2}>
+                        {item.subtitle}
+                      </Text>
+                    )}
+                    <Text style={styles.listItemMeta}>{item.meta}</Text>
+                  </View>
+                </TouchableOpacity>
+                {/* ปุ่ม X ลบรายการ — เฉพาะ tab Upload */}
+                {item.kind === 'uploaded' && (
+                  <TouchableOpacity
+                    onPress={() => removeUploadedById(item.id)}
+                    hitSlop={10}
+                    style={styles.listItemRemove}
+                    accessibilityLabel="Remove this uploaded image">
+                    <Text style={styles.listItemRemoveText}>×</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
             ListEmptyComponent={
               <View style={{padding: 24, alignItems: 'center'}}>
@@ -899,13 +960,50 @@ const styles = StyleSheet.create({
   },
   listCount: {color: theme.textMuted, fontWeight: '400'},
   listClose: {color: theme.text, fontSize: 14, letterSpacing: 0.5},
+  // กลุ่มปุ่มขวา (Clear all + Close)
+  listHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  listHeaderClearBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 0.5,
+    borderColor: theme.danger,
+    borderRadius: radius.sm,
+  },
+  listHeaderClearText: {
+    color: theme.danger,
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: 0.5,
+  },
+  // แต่ละแถว — เป็น row container ที่มีทั้งส่วนแตะกลาง + ปุ่ม X
   listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 0.5,
+    borderColor: theme.border,
+  },
+  listItemMain: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    borderBottomWidth: 0.5,
-    borderColor: theme.border,
+  },
+  listItemRemove: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+  },
+  listItemRemoveText: {
+    color: theme.danger,
+    fontSize: 24,
+    fontWeight: '300',
+    lineHeight: 24,
   },
   listThumb: {
     width: 56,
