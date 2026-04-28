@@ -1,6 +1,7 @@
 import RNFS from 'react-native-fs';
 import piexif from 'piexifjs';
 import {ProcessedFormData, GeoLocation} from '../types';
+import {readGpsNative} from './nativeExif';
 
 /**
  * แปลง UTF-8 string ↔ base64 แบบ safe
@@ -124,6 +125,26 @@ function formatGpsDate(d: Date): string {
 }
 
 /**
+ * แปลง EXIF DateTimeOriginal "YYYY:MM:DD HH:MM:SS" → ISO 8601 string
+ * (treat as local time — EXIF spec ไม่เก็บ timezone)
+ * ใช้ทั้ง path: native module + piexifjs fallback
+ */
+function parseExifDateTime(dto: string): string | undefined {
+  const m = dto.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+  if (!m) return undefined;
+  const [, y, mo, d, h, mi, s] = m;
+  const local = new Date(
+    Number(y),
+    Number(mo) - 1,
+    Number(d),
+    Number(h),
+    Number(mi),
+    Number(s),
+  );
+  return isNaN(local.getTime()) ? undefined : local.toISOString();
+}
+
+/**
  * แปลง EXIF GPS rational [[num,den], ...] → decimal degrees
  * piexif.GPSHelper มี dmsRationalToDeg แต่บางเวอร์ชันไม่ export เลยเขียนเอง
  */
@@ -157,9 +178,42 @@ export interface ExifGpsInfo {
 export async function readExifGps(
   filePath: string,
 ): Promise<ExifGpsInfo | null> {
+  // ────────────────────────────────────────────────────────────────
+  // PRIMARY: ลอง native module ก่อน (รับประกัน work บน Android 13+)
+  //   Android: androidx.exifinterface.ExifInterface
+  //   iOS:     CGImageSource + Photos.PHAsset
+  // ────────────────────────────────────────────────────────────────
+  try {
+    const native = await readGpsNative(filePath);
+    if (native) {
+      let capturedAt: string | undefined;
+      if (native.dateTimeOriginal) {
+        capturedAt = parseExifDateTime(native.dateTimeOriginal);
+      }
+      return {
+        latitude: native.latitude,
+        longitude: native.longitude,
+        capturedAt,
+      };
+    }
+  } catch {
+    // ผ่านไปลอง fallback piexif
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // FALLBACK: piexifjs (กรณี native module ไม่ available — เช่น
+  // จะรัน on JS-only environment, หรือ build เก่ายังไม่มี native)
+  //
+  // หมายเหตุ: piexif fallback มีข้อจำกัด — Android 13+ Photo Picker
+  // จะ strip GPS ก่อนถึงจุดนี้ ทำให้อ่านไม่เห็น เลยต้อง native เป็นหลัก
+  // ────────────────────────────────────────────────────────────────
+  // ตัด file:// prefix สำหรับ RNFS (รุ่นเก่าไม่รองรับ scheme prefix)
+  const rnfsPath = filePath.startsWith('file://')
+    ? filePath.replace('file://', '')
+    : filePath;
   let raw: string;
   try {
-    raw = await RNFS.readFile(filePath, 'base64');
+    raw = await RNFS.readFile(rnfsPath, 'base64');
   } catch {
     return null;
   }
@@ -201,23 +255,8 @@ export async function readExifGps(
 
   // DateTimeOriginal: "YYYY:MM:DD HH:MM:SS" — แปลงเป็น ISO แบบประมาณ
   // (ไม่มี timezone ใน EXIF — treat as local)
-  let capturedAt: string | undefined;
   const dto: string | undefined = exif.Exif?.[piexif.ExifIFD.DateTimeOriginal];
-  if (dto) {
-    const m = dto.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
-    if (m) {
-      const [, y, mo, d, h, mi, s] = m;
-      const local = new Date(
-        Number(y),
-        Number(mo) - 1,
-        Number(d),
-        Number(h),
-        Number(mi),
-        Number(s),
-      );
-      if (!isNaN(local.getTime())) capturedAt = local.toISOString();
-    }
-  }
+  const capturedAt = dto ? parseExifDateTime(dto) : undefined;
 
   return {latitude, longitude, capturedAt};
 }

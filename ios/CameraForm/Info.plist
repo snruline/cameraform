@@ -33,7 +33,11 @@
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>CAMERAFORM uses your location to tag photos and pin them on the map.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>CAMERAFORM reads GPS coordinates from your selected photos to pin them on the map.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>CAMERAFORM uses the camera to capture photos with embedded location and metadata.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

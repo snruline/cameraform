@@ -310,10 +310,6 @@ export const MapScreen: React.FC = () => {
       let skipped = 0;
       const skippedNames: string[] = [];
 
-      // Helper: ทำ path สะอาด สำหรับ RNFS (ตัด file:// prefix ถ้ามี)
-      const toReadablePath = (u: string): string =>
-        u.startsWith('file://') ? u.replace('file://', '') : u;
-
       for (const r of results) {
         const copiedUri: string | null = (r as any).fileCopyUri ?? null;
         const originalUri: string | null = r.uri ?? null;
@@ -323,17 +319,17 @@ export const MapScreen: React.FC = () => {
           continue;
         }
 
-        // อ่าน EXIF GPS — ลองหลายแหล่งเพราะบาง Android picker copy ไฟล์
-        // แล้ว re-encode JPEG ทำให้ EXIF GPS หายไป
-        // 1) ลอง originalUri ก่อน — content:// หรือ file:// ของไฟล์ต้นฉบับ
-        //    (RNFS readFile รองรับ content:// บน Android API 21+)
-        // 2) ถ้าไม่ได้ค่อย fall back ไป copiedUri
+        // อ่าน EXIF GPS — ลองหลายแหล่งเพราะบางครั้ง picker copy ไฟล์
+        // แล้ว GPS metadata หายไป (เช่น Android Photo Picker บน 13+)
+        // 1) originalUri ก่อน — content:// หรือ file:// ของไฟล์ต้นฉบับ
+        //    Native module ของเราอ่านได้ทุกรูปแบบ URI โดยตรง
+        // 2) fallback ไป copiedUri ถ้าจำเป็น
         let gps = null;
         if (originalUri) {
-          gps = await readExifGps(toReadablePath(originalUri));
+          gps = await readExifGps(originalUri);
         }
         if (!gps && copiedUri && copiedUri !== originalUri) {
-          gps = await readExifGps(toReadablePath(copiedUri));
+          gps = await readExifGps(copiedUri);
         }
 
         if (!gps) {

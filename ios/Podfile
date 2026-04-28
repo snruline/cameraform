@@ -23,6 +23,10 @@ target 'CameraForm' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
+  # Local native module — EXIF GPS reader (ใช้กับ Map upload feature)
+  # Source อยู่ที่ ios/ExifReader/ — pod install จะ link เข้า project อัตโนมัติ
+  pod 'ExifReader', :path => './ExifReader'
+
   target 'CameraFormTests' do
     inherit! :complete
     # Pods for testing

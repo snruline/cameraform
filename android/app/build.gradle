@@ -177,4 +177,8 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // ExifReader native module ใช้ androidx.exifinterface เพื่ออ่าน EXIF GPS
+    // จาก content:// URI โดยตรง (ที่ piexifjs ใน JS อ่านไม่ครบ)
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 }
