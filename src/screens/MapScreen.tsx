@@ -25,9 +25,11 @@ import {
   clearAllUploadedPhotos,
 } from '../database/uploadedPhotos';
 import {readExifGps} from '../security/exif';
+import {isNativeExifAvailable} from '../security/nativeExif';
 import {generateId} from '../utils/id';
 import {LEAFLET_HTML} from './mapHtml';
 import {theme, radius, space} from '../theme';
+import {APP_BUILD} from '../version';
 
 /**
  * Main #2 — Map Screen
@@ -585,6 +587,25 @@ export const MapScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Build/native module status banner — ดูเร็ว ๆ ว่า APK ที่ install
+              เป็น version ไหน + native EXIF reader ทำงานได้ไหม */}
+          {tab === 'upload' && (
+            <View style={styles.statusBanner}>
+              <Text style={styles.statusText}>
+                Build: {APP_BUILD}  ·  Native EXIF:{' '}
+                <Text
+                  style={{
+                    color: isNativeExifAvailable()
+                      ? theme.text
+                      : theme.danger,
+                    fontWeight: '600',
+                  }}>
+                  {isNativeExifAvailable() ? '✓ enabled' : '✗ NOT linked'}
+                </Text>
+              </Text>
+            </View>
+          )}
           <FlatList
             data={currentList}
             keyExtractor={item => `${item.kind}:${item.id}`}
@@ -985,6 +1006,19 @@ const styles = StyleSheet.create({
   },
   listCount: {color: theme.textMuted, fontWeight: '400'},
   listClose: {color: theme.text, fontSize: 14, letterSpacing: 0.5},
+  // Status banner — แสดง build version + native module status
+  statusBanner: {
+    backgroundColor: theme.surfaceAlt,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 0.5,
+    borderColor: theme.border,
+  },
+  statusText: {
+    color: theme.textMuted,
+    fontSize: 11,
+    letterSpacing: 0.3,
+  },
   // กลุ่มปุ่มขวา (Clear all + Close)
   listHeaderActions: {
     flexDirection: 'row',
